@@ -21,13 +21,13 @@ writing your own
 ========
 
 ```python
-import powermate
+from powermate import PowerMateBase, LedEvent, MAX_BRIGHTNESS
 
-class ExamplePowerMate(powermate.PowerMateBase):
+class ExamplePowerMate(PowerMateBase):
   def __init__(self, path):
     super(ExamplePowerMate, self).__init__(path)
     self._pulsing = False
-    self._brightness = 255
+    self._brightness = MAX_BRIGHTNESS
 
   def short_press(self):
     print('Short press!')
@@ -43,7 +43,7 @@ class ExamplePowerMate(powermate.PowerMateBase):
 
   def rotate(self, rotation):
     print('Rotate {}!'.format(rotation))
-    self._brightness = max(0, min(255, self._brightness + rotation))
+    self._brightness = max(0, min(MAX_BRIGHTNESS, self._brightness + rotation))
     self._pulsing = False
     return LedEvent(brightness=self._brightness)
 

@@ -22,6 +22,7 @@ EVENT_FORMAT = 'llHHi'
 PUSH = 0x01
 ROTATE = 0x02
 MAX_BRIGHTNESS = 255
+MAX_PULSE_SPEED = 255
 
 # We don't want a huge backlog of events, otherwise we get bad situations where
 # the listener is processing really old events and takes a while to catch up to
@@ -60,7 +61,8 @@ class Event(object):
 
 
 class LedEvent(Event):
-  def __init__(self, brightness=255, speed=0, pulse_type=0, asleep=0, awake=0):
+  def __init__(self, brightness=MAX_BRIGHTNESS, speed=0,
+               pulse_type=0, asleep=0, awake=0):
     self.brightness = brightness
     self.speed = speed
     self.pulse_type = pulse_type
@@ -82,11 +84,11 @@ class LedEvent(Event):
 
   @classmethod
   def pulse(cls):
-    return cls(speed=255, pulse_type=2, asleep=1, awake=1)
+    return cls(speed=MAX_PULSE_SPEED, pulse_type=2, asleep=1, awake=1)
 
   @classmethod
   def max(cls):
-    return cls(brightness=255)
+    return cls(brightness=MAX_BRIGHTNESS)
 
   @classmethod
   def off(cls):
@@ -235,7 +237,7 @@ class ExamplePowerMate(PowerMateBase):
   def __init__(self, path):
     super(ExamplePowerMate, self).__init__(path)
     self._pulsing = False
-    self._brightness = 255
+    self._brightness = MAX_BRIGHTNESS
 
   def short_press(self):
     print('Short press!')
@@ -251,7 +253,7 @@ class ExamplePowerMate(PowerMateBase):
 
   def rotate(self, rotation):
     print('Rotate {}!'.format(rotation))
-    self._brightness = max(0, min(255, self._brightness + rotation))
+    self._brightness = max(0, min(MAX_BRIGHTNESS, self._brightness + rotation))
     self._pulsing = False
     return LedEvent(brightness=self._brightness)
 
