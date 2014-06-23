@@ -42,13 +42,13 @@ class ExamplePowerMate(powermate.PowerMateBase):
     print('Long press!')
 
   def rotate(self, rotation):
-    print('Rotate %d!' % (rotation,))
+    print('Rotate {}!'.format(rotation))
     self._brightness = max(0, min(255, self._brightness + rotation))
     self._pulsing = False
     return LedEvent(brightness=self._brightness)
 
   def push_rotate(self, rotation):
-    print('Push rotate %d!' % (rotation,))
+    print('Push rotate {}!'.format(rotation))
 
 if __name__ == '__main__':
   pm = ExamplePowerMate(glob.glob('/dev/input/by-id/*PowerMate*')[0])
