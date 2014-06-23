@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
+
+from __future__ import print_function
+
 import collections
 import glob
+try:
+  import queue
+except ImportError:
+  import Queue as queue
 import struct
+import threading
+import traceback
 
 
 EV_MSC = 0x04
@@ -12,6 +21,18 @@ EVENT_FORMAT = 'llHHi'
 
 PUSH = 0x01
 ROTATE = 0x02
+MAX_BRIGHTNESS = 255
+
+# We don't want a huge backlog of events, otherwise we get bad situations where
+# the listener is processing really old events and takes a while to catch up to
+# current ones. If a listener is slow the expected behavior is to drop events
+# for that listener.
+MAX_QUEUE_SIZE = 5
+
+
+class EventNotImplemented(NotImplementedError):
+  """Special exception type for non-implemented events."""
+
 
 class Event(object):
   def __init__(self, tv_sec, tv_usec, type, code, value):
@@ -63,31 +84,93 @@ class LedEvent(Event):
   def pulse(cls):
     return cls(speed=255, pulse_type=2, asleep=1, awake=1)
 
+  @classmethod
+  def max(cls):
+    return cls(brightness=255)
 
-class PowerMateBase(object):
-  def __init__(self, path, long_threshold=1000):
+  @classmethod
+  def off(cls):
+    return cls(brightness=0)
+
+  @classmethod
+  def percent(cls, percent):
+    return cls(brightness=int(percent * MAX_BRIGHTNESS))
+
+
+class FileEventSource(object):
+  def __init__(self, path, event_size):
+    self.__event_size = event_size
     self.__event_in = open(path, 'rb')
     self.__event_out = open(path, 'wb')
+
+  def __iter__(self):
+    data = b''
+    while True:
+      data += self.__event_in.read(EVENT_SIZE)
+      if len(data) >= EVENT_SIZE:
+        event = Event.fromraw(data[:EVENT_SIZE])
+        data = data[EVENT_SIZE:]
+        try:
+          yield event
+        except EventNotImplemented:
+          pass
+        except Exception:
+          import traceback
+          traceback.print_exc()
+
+  def send(self, event):
+    self.__event_out.write(event.raw())
+    self.__event_out.flush()
+
+
+class QueueEventSource(object):
+  def __init__(self, source):
+    self.source = source
+    self.queues = []
+
+  def __iter__(self):
+    q = queue.Queue(MAX_QUEUE_SIZE)
+    self.queues.append(q)
+    def iter_queue():
+      while True:
+        yield q.get()
+    return iter_queue()
+
+  def watch(self):
+    for event in self.source:
+      for q in self.queues:
+        try:
+          q.put_nowait(event)
+        except queue.Full:
+          pass
+
+  def send(self, event):
+    self.source.send(event)
+
+
+class EventHandler(object):
+  def handle_events(self, source):
+    for event in source:
+      try:
+        return_event = self.handle_event(event)
+      except EventNotImplemented:
+        pass
+      except Exception as e:
+        traceback.print_exc()
+      else:
+        if return_event is not None:
+          source.send(return_event)
+
+  def handle_event(self, event):
+    raise EventNotImplemented
+
+
+class PowerMateEventHandler(EventHandler):
+  def __init__(self, long_threshold=1000):
     self.__rotated = False
     self.button = 0
     self.__button_time = 0
-    self.__long_threshold = 1000
-
-  def run(self):
-    self.__run = True
-    self.handle_events()
-
-  def stop(self):
-    self.__run = False
-
-  def handle_events(self):
-    while self.__run:
-      event = Event.fromraw(self.__event_in.read(24))
-      try:
-        self.handle_event(event)
-      except Exception:
-        import traceback
-        traceback.print_exc()
+    self.__long_threshold = long_threshold
 
   def handle_event(self, event):
     if event.type == PUSH:
@@ -100,65 +183,89 @@ class PowerMateBase(object):
         if self.__rotated:
           return
         if time - self.__button_time > self.__long_threshold:
-          self.long_press()
+          return self.long_press()
         else:
-          self.short_press()
+          return self.short_press()
     elif event.type == ROTATE:
       if self.button:
         self.__rotated = True
-        self.push_rotate(event.value)
+        return self.push_rotate(event.value)
       else:
-        self.rotate(event.value)
-
-  def pulse_led(self):
-    self.__event_out.write(LedEvent.pulse().raw())
-    self.__event_out.flush()
-
-  def set_led(self, brightness=255):
-    self.__event_out.write(LedEvent(brightness).raw())
-    self.__event_out.flush()
+        return self.rotate(event.value)
 
   def short_press(self):
-    raise NotImplemented
+    raise EventNotImplemented
 
   def long_press(self):
-    raise NotImplemented
+    # default to short press if long press is not defined
+    return short_press()
 
   def rotate(self, rotation):
-    raise NotImplemented
+    raise EventNotImplemented
 
   def push_rotate(self, rotation):
-    raise NotImplemented
+    raise EventNotImplemented
 
 
-class PowerMate(PowerMateBase):
+class AsyncFileEventDispatcher(object):
+  def __init__(self, path, event_size=EVENT_SIZE):
+    self.__filesource = FileEventSource(path, event_size)
+    self.__source = QueueEventSource(self.__filesource)
+    self.__threads = []
+
+  def add_listener(self, event_handler):
+    thread = threading.Thread(target=event_handler.handle_events,
+                              args=(self.__source,))
+    thread.daemon = True
+    thread.start()
+    self.__threads.append(thread)
+
+  def run(self):
+    self.__source.watch()
+
+
+class PowerMateBase(AsyncFileEventDispatcher, PowerMateEventHandler):
+  def __init__(self, path, long_threshold=1000):
+    AsyncFileEventDispatcher.__init__(self, path)
+    PowerMateEventHandler.__init__(self, long_threshold)
+    self.add_listener(self)
+
+
+class ExamplePowerMate(PowerMateBase):
   def __init__(self, path):
-    super(PowerMate, self).__init__(path)
+    super(ExamplePowerMate, self).__init__(path)
     self._pulsing = False
     self._brightness = 255
-    self.short_press()
+
   def short_press(self):
     print('Short press!')
     self._pulsing = not self._pulsing
     print(self._pulsing)
     if self._pulsing:
-      self.pulse_led()
+      return LedEvent.pulse()
     else:
-      self.set_led(self._brightness)
+      return LedEvent(brightness=self._brightness)
+
   def long_press(self):
     print('Long press!')
+
   def rotate(self, rotation):
-    self._brightness += rotation
-    if self._brightness < 0:
-      self._brightness = 0
-    if self._brightness > 255:
-      self._brightness = 255
     print('Rotate %d!' % (rotation,))
-    print('Brightness: %d' % (self._brightness))
-    self.set_led(self._brightness)
+    self._brightness = max(0, min(255, self._brightness + rotation))
+    self._pulsing = False
+    return LedEvent(brightness=self._brightness)
+
   def push_rotate(self, rotation):
     print('Push rotate %d!' % (rotation,))
 
+
+class ExampleBadHandler(PowerMateEventHandler):
+  def rotate(self, rotation):
+    import time
+    time.sleep(1)
+
+
 if __name__ == "__main__":
-  pm = PowerMate(glob.glob('/dev/input/by-id/*PowerMate*')[0])
+  pm = ExamplePowerMate(glob.glob('/dev/input/by-id/*PowerMate*')[0])
+  pm.add_listener(ExampleBadHandler())
   pm.run()
