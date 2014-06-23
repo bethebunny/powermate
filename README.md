@@ -15,7 +15,7 @@ to do the following (ymmv, but this should work on most modern distros).
 ```shellsession
 $ sudo groupadd input
 $ sudo usermod -a -G input "$USER"
-$ echo 'KERNEL=="event*", NAME="input/%k", MODE="660", GROUP="input"' | sudo tee /etc/udev/rules.d/99-input.rules
+$ echo 'KERNEL=="event*", NAME="input/%k", MODE="660", GROUP="input"' | sudo tee -a /etc/udev/rules.d/99-input.rules
 ```
 
 After a reboot your scripts should be able to read/write to the device.
