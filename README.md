@@ -1,7 +1,7 @@
 powermate
 =========
 
-A small python framework for scripting interactions with the Griffin Powermate
+A small python framework for scripting interactions with the Griffin Powermate. Compatible with both python 2 and 3.
 
 setup
 =========
@@ -9,7 +9,7 @@ setup
 In order to read and write to the Powermate event files on linux, you will need
 to do the following (ymmv, but this should work on most modern distros).
 
-```
+```shellsession
 $ sudo groupadd input
 $ sudo usermod -a -G input "$USER"
 $ echo 'KERNEL=="event*", NAME="input/%k", MODE="660", GROUP="input"' | sudo tee /etc/udev/rules.d/99-input.rules
@@ -20,7 +20,7 @@ After a reboot your scripts should be able to read/write to the device.
 writing your own
 ========
 
-```
+```python
 import powermate
 
 class ExamplePowerMate(powermate.PowerMateBase):
