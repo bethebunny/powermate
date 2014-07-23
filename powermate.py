@@ -16,8 +16,8 @@ import traceback
 EV_MSC = 0x04
 MSC_PULSELED = 0x01
 
-EVENT_SIZE = 24
 EVENT_FORMAT = 'llHHi'
+EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
 
 PUSH = 0x01
 ROTATE = 0x02
