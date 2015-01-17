@@ -200,7 +200,7 @@ class PowerMateEventHandler(EventHandler):
 
   def long_press(self):
     # default to short press if long press is not defined
-    return short_press()
+    return self.short_press()
 
   def rotate(self, rotation):
     raise EventNotImplemented
