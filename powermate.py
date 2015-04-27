@@ -53,9 +53,9 @@ class Event(object):
     return cls(tv_sec, tv_usec, type, code, value)
 
   def __repr__(self):
-    return '%s(%s)' % (
+    return '{}({})'.format(
       self.__class__.__name__,
-      ', '.join('%s=%s' % (k, getattr(self, k))
+      ', '.join('{}={}'.format(k, getattr(self, k))
                 for k in self.__dict__ if not k.startswith('_'))
     )
 
@@ -100,53 +100,82 @@ class LedEvent(Event):
 
 
 class FileEventSource(object):
+  """An event source which reads and writes to a file object."""
   def __init__(self, path, event_size):
     self.__event_size = event_size
     self.__event_in = open(path, 'rb')
     self.__event_out = open(path, 'wb')
 
   def __iter__(self):
+    """Read events from the source sequentially."""
     data = b''
     while True:
       data += self.__event_in.read(EVENT_SIZE)
       if len(data) >= EVENT_SIZE:
         event = Event.fromraw(data[:EVENT_SIZE])
         data = data[EVENT_SIZE:]
-        try:
-          yield event
-        except EventNotImplemented:
-          pass
-        except Exception:
-          import traceback
-          traceback.print_exc()
+        yield event
 
   def send(self, event):
+    """Write an event to the source."""
     self.__event_out.write(event.raw())
     self.__event_out.flush()
 
 
-class QueueEventSource(object):
-  def __init__(self, source):
+class EventQueue(object):
+  """A thread-safe event queue which registers any number of listeners
+  for an event source.
+
+  This will store a small number of items in order for a listener to read,
+  and they are then available to iterate over. If more events than the
+  specified maximum are in a listener's queue, it will stop enqueueing new
+  events. If for instance a listener takes a long break and max_queue_size
+  is K, it will read the next K events after the sleep started (the oldest
+  K events not read) and then continue to read new events. Any intermediate
+  events will be dropped for that listener.
+
+  Listeners may be simply registered by iterating over the queue, or
+  through the .iterate method for more configuration.
+  """
+  def __init__(self, source, max_queue_size=MAX_QUEUE_SIZE):
     self.source = source
-    self.queues = []
+    self.queues = collections.OrderedDict()
+    self._lock = threading.Lock()
+    self.max_queue_size = max_queue_size
 
   def __iter__(self):
-    q = queue.Queue(MAX_QUEUE_SIZE)
-    self.queues.append(q)
+    return self.iterate()
+
+  def iterate(self, max_queue_size=None):
+    """Register a listener on the queue, and retrieve an iterator for them."""
+    q = queue.Queue(max_queue_size or self.max_queue_size)
+    key = object()
+    with self._lock:
+      self.queues[key] = q
     def iter_queue():
-      while True:
-        yield q.get()
+      try:
+        while True:
+          yield q.get()
+      except GeneratorExit:
+        with self._lock:
+          del self.queues[key]
+
     return iter_queue()
 
   def watch(self):
+    """Watch the underlying event source for events and
+       send them to each registered queue."""
     for event in self.source:
-      for q in self.queues:
+      with self._lock:
+        active_queues = list(self.queues.values())
+      for q in active_queues:
         try:
           q.put_nowait(event)
         except queue.Full:
           pass
 
   def send(self, event):
+    """Send an event to the underlying event source."""
     self.source.send(event)
 
 
@@ -178,10 +207,11 @@ class PowerMateEventHandler(EventHandler):
     if event.type == PUSH:
       time = event.tv_sec * 10 ** 3 + (event.tv_usec * 10 ** -3)
       self.button = event.value
-      if event.value:  #button depressed
+      if event.value:  # button depressed
         self.__button_time = time
         self.__rotated = False
       else:
+        # If we have rotated this push, don't execute a push
         if self.__rotated:
           return
         if time - self.__button_time > self.__long_threshold:
@@ -195,24 +225,26 @@ class PowerMateEventHandler(EventHandler):
       else:
         return self.rotate(event.value)
 
+    raise EventNotImplemented('unknown')
+
   def short_press(self):
-    raise EventNotImplemented
+    raise EventNotImplemented('short_press')
 
   def long_press(self):
     # default to short press if long press is not defined
     return self.short_press()
 
   def rotate(self, rotation):
-    raise EventNotImplemented
+    raise EventNotImplemented('rotate')
 
   def push_rotate(self, rotation):
-    raise EventNotImplemented
+    raise EventNotImplemented('push_rotate')
 
 
 class AsyncFileEventDispatcher(object):
   def __init__(self, path, event_size=EVENT_SIZE):
     self.__filesource = FileEventSource(path, event_size)
-    self.__source = QueueEventSource(self.__filesource)
+    self.__source = EventQueue(self.__filesource)
     self.__threads = []
 
   def add_listener(self, event_handler):
