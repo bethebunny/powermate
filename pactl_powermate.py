@@ -10,9 +10,10 @@ import powermate
 
 class PowerMate(powermate.PowerMateBase):
   def rotate(self, rotation):
-    sink = pactl.inc_volume(rotation)
+    sink = pactl.active_sink()
     if sink:
-      return powermate.LedEvent.percent(int(sink['volume']) / 100)
+      volume = sink.inc_volume(rotation)
+      return powermate.LedEvent.percent(volume / 100)
 
 
 if __name__ == '__main__':

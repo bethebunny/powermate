@@ -17,51 +17,60 @@ import re
 import subprocess
 
 
-LIST_PATTERNS = {
-    'state': 'State: (\w+)',
-    'volume': 'Volume: 0: +(\d+)%',
-    'name': 'Name: (.+)'
-}
+class Sink(object):
+  """A class wrapping attributes of PulseAudio sink properties."""
+
+  LIST_PATTERNS = {
+      'state': (str, 'State: (\w+)'),
+      'volume': (int, 'Volume: 0: +(\d+)%'),
+      'name': (str, 'Name: (.+)'),
+  }
+
+  __slots__ = tuple(LIST_PATTERNS)
+
+  def __init__(self, **kwargs):
+    for key, arg in kwargs.items():
+      setattr(self, key, arg)
+
+  def set_volume(self, value):
+    """Set an absolute volume (0-100)."""
+    if not 0 <= value <= 100:
+      raise ValueError("Volume must be between 0 and 100")
+    return subprocess.check_call(
+        ['pactl', 'set-sink-volume', self.name, '{}%'.format(value)])
+
+  def inc_volume(self, delta=1):
+    """Set a relative volume (can be negative)."""
+    new_volume = max(0, min(100, self.volume + delta))
+    self.set_volume(new_volume)
+    return new_volume
 
 
 def list_sinks():
-  """Return a list of sink objects; these are dicts of properties."""
+  """Iterate system's sink objects as Sinks."""
   output = subprocess.check_output(['pactl', 'list', 'sinks']).decode()
-  sinks = []
+  if not output.strip():
+    return
 
-  for line in output.split('\n'):
+  sink = {}
+
+  for line in output.split('\n')[1:]:  # first line starts a sink
     if line.startswith('Sink #'):
+      yield Sink(**sink)
       sink = {}
-      sinks.append(sink)
     else:
       # While it's close to YAML output, it isn't, and doesn't parse at all :P
       # So some mad hacks here to pull out some basic data
-      for prop, pattern in LIST_PATTERNS.items():
+      for prop, (conversion, pattern) in Sink.LIST_PATTERNS.items():
         vals = re.findall(pattern, line)
         if vals:
-          sink[prop] = vals[0]
+          sink[prop] = conversion(vals[0])
 
-  return sinks
+  yield Sink(**sink)
 
 
 def active_sink():
   """Retrieve the first running PulseAudio sink."""
   for sink in list_sinks():
-    if sink['state'] == 'RUNNING':
+    if sink.state == 'RUNNING':
       return sink
-
-
-def set_volume(value, sink=None):
-  """Set an absolute volume for a sink (0-100). Default to active sink."""
-  sink = sink or active_sink()
-  return subprocess.check_call(['pactl', 'set-sink-volume', sink['name'],
-                                '{}%'.format(value)])
-
-
-def inc_volume(delta=1, sink=None):
-  """Set a relative volume for a sink (can be negative). Default to active sink."""
-  sink = sink or active_sink()
-  if sink:
-    volume = int(sink['volume'])
-    set_volume(max(0, min(100, volume + delta)), sink=sink)
-    return sink
