@@ -254,6 +254,9 @@ class AsyncFileEventDispatcher(object):
     thread.start()
     self.__threads.append(thread)
 
+  def send_event(self, event):
+    self.__source.send(event)
+
   def run(self):
     self.__source.watch()
 
