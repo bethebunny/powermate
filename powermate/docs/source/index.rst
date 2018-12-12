@@ -7,8 +7,10 @@ Welcome to powermate's documentation!
 =====================================
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+   :maxdepth: 3
+   :caption: Library Reference:
+
+   modules/powermate
 
 
 

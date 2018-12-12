@@ -4,8 +4,8 @@ from __future__ import division
 
 import glob
 
-import pactl
-import powermate
+from . import pactl
+from . import powermate
 
 
 class PowerMate(powermate.PowerMateBase):
